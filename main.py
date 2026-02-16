@@ -83,7 +83,7 @@ def get_semantic_search_query(user_raw_query, history):
     {menu_str}
     {context_recent}
     CÂU HỎI NGƯỜI DÙNG: "{user_raw_query}"
-    YÊU CẦU: CHỈ TRẢ VỀ chuỗi keyword tương ứng hoặc câu hỏi gốc. Không giải thích."""
+    YÊU CẦU: CHỈ TRẢ VỀ chuỗi keyword tương ứng trong danh sách hoặc câu hỏi gốc. Không giải thích."""
 
     try:
         response = client.models.generate_content(model=MODEL_ID, contents=prompt)
@@ -128,7 +128,7 @@ async def chat_endpoint(req: ChatRequest):
             return {"reply": "🤖 Bot: Câu hỏi này nằm ngoài phạm vi cẩm nang sinh viên FPTU."}
 
         # BƯỚC 3: GENERATION (GIỮ NGUYÊN LOGIC)
-        system_instruction = "Bạn là trợ lý ảo thông minh cho sinh viên Đại học FPT Đà Nẵng. Trả lời thân thiện, ngắn gọn, có icon."
+        system_instruction = "Bạn là trợ lý ảo thông minh cho sinh viên Đại học FPT Đà Nẵng. Trả lời thân thiện, ngắn gọn, có icon, dựa trên thông tin trong cẩm nang."
 
         response = client.models.generate_content(
             model=MODEL_ID,
