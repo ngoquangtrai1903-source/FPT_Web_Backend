@@ -152,7 +152,7 @@ async def chat_endpoint(req: ChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-
-    # Lấy port từ môi trường (cho Render) hoặc mặc định 8000
+    # Lấy port từ Render cấp, nếu chạy máy nhà thì dùng 8000
     port = int(os.environ.get("PORT", 8000))
+    # Nhớ để host="0.0.0.0" để Render quét được cổng nhé
     uvicorn.run(app, host="0.0.0.0", port=port)
