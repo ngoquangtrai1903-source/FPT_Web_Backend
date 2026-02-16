@@ -1,35 +1,51 @@
+import os
 import firebase_admin
+from google import genai  # Thư viện SDK mới nhất
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.vector import Vector
-from sentence_transformers import SentenceTransformer
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- 1. KHỞI TẠO KẾT NỐI ---
 if not firebase_admin._apps:
     cred = credentials.Certificate("service-account.json")
     firebase_admin.initialize_app(cred)
 db = firestore.client()
-model = SentenceTransformer('all-MiniLM-L6-v2')
 
+# Khởi tạo Client Gemini mới
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+TARGET_COLLECTION = "fpt_handbook_v1" # Đặt biến này ở ngoài để dùng chung
 
 def upload_vector_final(vector_id, full_text, search_key, chapter, section):
-    # Mã hóa bản tóm tắt để lấy tọa độ Vector chính xác nhất
     rich_context = f"Question context: {search_key} | Content preview: {full_text[:200]}"
-    embedding = model.encode(rich_context).tolist()
+    try:
+        result = client.models.embed_content(
+            model="gemini-embedding-001",
+            contents=rich_context,
+            config={'task_type': 'RETRIEVAL_DOCUMENT', 'title': search_key, 'output_dimensionality': 1536}
+        )
 
-    data = {
-        "content": full_text.strip(),  # Nội dung đầy đủ 100% của bạn
-        "search_key": search_key,  # Từ khóa định danh để máy tìm cho nhanh
-        "embedding": Vector(embedding),  # Dãy số Vector
-        "metadata": {
-            "chapter": chapter,
-            "section": section,
-            "vector_id": vector_id
+        embedding_values = [float(x) for x in result.embeddings[0].values]
+
+        data = {
+            "content": full_text.strip(),
+            "search_key": search_key,
+            "embedding": Vector(embedding_values),
+            "metadata": {
+                "chapter": chapter,
+                "section": section,
+                "vector_id": vector_id
+            }
         }
-    }
 
-    # Lưu vào collection 'handbook_vectors' với ID cố định để dễ quản lý
-    db.collection("handbook_vectors").document(vector_id).set(data)
-    print(f"✅ Đã tải lên thành công: {vector_id} - {section}")
+        # CHÚ Ý: Sử dụng biến TARGET_COLLECTION ở đây thay vì viết cứng tên
+        db.collection(TARGET_COLLECTION).document(vector_id).set(data)
+        print(f"✅ Đã tải lên thành công: {vector_id} - {section}")
+
+    except Exception as e:
+        print(f"❌ Lỗi tại {vector_id}: {str(e)}")
 
 
 # --- 2. DÁN NỘI DUNG CỦA BẠN VÀO ĐÂY ---
@@ -462,15 +478,19 @@ Dành ra 10–15 phút xem trước bài giúp bạn nắm được hướng đi
 """
 v13_key = (
     "quản lý thời gian, thói quen ngủ, xem trước bài, check attendance fap, kỹ năng tự học hiệu quả, sức khỏe não bộ")  # --- 3. LỆNH CHẠY UPLOAD (ĐÃ CHECK LỖI) ---
+# --- 3. LỆNH CHẠY UPLOAD (ĐÃ ĐỒNG NHẤT TÊN COLLECTION) ---
 if __name__ == "__main__":
-    # Gợi ý: Thêm lệnh xóa sạch collection trước khi chạy nếu bạn cảm thấy data cũ đang gây nhiễu
-    docs = db.collection("handbook_vectors").stream()
-    for doc in docs: doc.reference.delete()
+    print(f"🚀 Đang làm sạch và chuẩn bị tải lên collection: {TARGET_COLLECTION}...")
+
+    # Xóa dữ liệu cũ của collection MỚI (để tránh trùng lặp khi chạy lại nhiều lần)
+    docs = db.collection(TARGET_COLLECTION).stream()
+    for doc in docs:
+        doc.reference.delete()
 
     upload_vector_final("V1", v1_full, v1_key, 1, "1.1 - Thi đầu vào")
     upload_vector_final("V2", v2_full, v2_key, 1, "1.2 - LUK Global")
     upload_vector_final("V3", v3_full, v3_key, 1, "1.3 - Summit & TopNotch")
-    upload_vector_final("V4", v4_full, v4_key, 1, "1.3.1 - Tips Pass ENT")  # Chỗ này đã sửa Section cho rõ ràng
+    upload_vector_final("V4", v4_full, v4_key, 1, "1.3.1 - Tips Pass ENT")
     upload_vector_final("V5", v5_full, v5_key, 2, "2.1 - Nhạc cụ dân tộc")
     upload_vector_final("V6", v6_full, v6_key, 2, "2.2 - Vovinam")
     upload_vector_final("V7", v7_full, v7_key, 3, "3.1 - Quân sự")
@@ -478,7 +498,7 @@ if __name__ == "__main__":
     upload_vector_final("V9", v9_full, v9_key, 4, "4.2 - KTX vs Trọ")
     upload_vector_final("V10", v10_full, v10_key, 4, "4.3 - Cẩm nang thuê trọ")
     upload_vector_final("V11", v11_full, v11_key, 4, "4.4 - Ẩm thực ăn uống")
-    upload_vector_final("V12", v12_full, v12_key, 5, "5.A - Link & Kỹ thuật")  # Đã sửa lại Section
-    upload_vector_final("V13", v13_full, v13_key, 5, "5.B - Thói quen học tập")  # Đã sửa lại Section
+    upload_vector_final("V12", v12_full, v12_key, 5, "5.A - Link & Kỹ thuật")
+    upload_vector_final("V13", v13_full, v13_key, 5, "5.B - Thói quen học tập")
 
-    print("\n🚀 HOÀN TẤT! Dữ liệu đã sạch và được mã hóa chuẩn xác.")
+    print("\n🚀 QUÁ TRÌNH HOÀN TẤT!")

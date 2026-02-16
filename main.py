@@ -8,12 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
-# Thư viện AI và Vector Search (Dựa trên logic bạn cung cấp)
-from sentence_transformers import SentenceTransformer
-from google.cloud.firestore_v1.vector import Vector
-from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 from google import genai
 from google.genai import types
+from google.cloud.firestore_v1.vector import Vector
+from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 
 # --- 0. LOAD BIẾN MÔI TRƯỜNG ---
 load_dotenv()
@@ -21,7 +19,6 @@ load_dotenv()
 # --- 1. CẤU HÌNH FASTAPI & CORS ---
 app = FastAPI(title="FPTU RAG Backend")
 
-# Cho phép Next.js gọi API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,26 +28,24 @@ app.add_middleware(
 
 # --- 2. KHỞI TẠO DỊCH VỤ ---
 
-# Kết nối Firestore (Xử lý thông minh cho cả Local và Deploy)
 if not firebase_admin._apps:
     fb_config = os.getenv("FIREBASE_CONFIG")
     if fb_config:
-        # Chế độ Deploy (Dùng chuỗi JSON trong Env)
         cred = credentials.Certificate(json.loads(fb_config))
     else:
-        # Chế độ Local (Dùng file vật lý)
         cred_path = os.getenv("FIREBASE_SERVICE_ACCOUNT", "service-account.json")
         cred = credentials.Certificate(cred_path)
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
 
-# Khởi tạo Gemini và Embedding Model
+# Khởi tạo Gemini Client
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL_ID = "gemini-2.5-flash"  # Bạn có thể đổi sang 1.5-flash nếu cần
-model_embed = SentenceTransformer('all-MiniLM-L6-v2')
+MODEL_ID = "gemini-2.5-flash"
+# CHỈNH MODEL: Khớp với model bạn dùng để upload
+MODEL_EMBED = "gemini-embedding-001"
 
-# --- 3. MENU ĐỊNH TUYẾN (Dựa trên module NLP của bạn) ---
+# --- 3. MENU ĐỊNH TUYẾN (GIỮ NGUYÊN 100%) ---
 SEARCH_KEYS_MENU = {
     "V1": "thi tiếng anh đầu vào, xếp lớp, ielts 6.0, miễn học dự bị, cấu trúc đề thi, writing skill",
     "V2": "lộ trình luk global, hurricane, greenfire, heatwave, thunderbolt, debate, thuyết trình",
@@ -67,27 +62,20 @@ SEARCH_KEYS_MENU = {
     "V13": "quản lý thời gian, thói quen ngủ, xem trước bài, check attendance fap, kỹ năng tự học"
 }
 
-
 # --- 4. CẤU TRÚC DỮ LIỆU ---
 class ChatMessage(BaseModel):
     role: str
     content: str
 
-
 class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = []
 
-
 # --- 5. LOGIC XỬ LÝ CHÍNH ---
 
 def get_semantic_search_query(user_raw_query, history):
-    """Router: Dùng LLM chọn bộ Key tối ưu từ Menu"""
     menu_str = "\n".join([f"- {k}: {v}" for k, v in SEARCH_KEYS_MENU.items()])
-
-    context_recent = ""
-    if history:
-        context_recent = f"Ngữ cảnh lịch sử: {history[-1].content}"
+    context_recent = f"Ngữ cảnh lịch sử: {history[-1].content}" if history else ""
 
     prompt = f"""Bạn là bộ định tuyến dữ liệu cho sinh viên FPTU.
     Nhiệm vụ: Phân tích câu hỏi và chọn ra BỘ KEYWORD phù hợp nhất.
@@ -103,17 +91,24 @@ def get_semantic_search_query(user_raw_query, history):
     except:
         return user_raw_query
 
-
 @app.post("/chat")
 async def chat_endpoint(req: ChatRequest):
     try:
-        # BƯỚC 1: ROUTING
+        # BƯỚC 1: ROUTING (GIỮ NGUYÊN LOGIC)
         search_query = get_semantic_search_query(req.message, req.history)
         print(f"🎯 Router đã chọn: {search_query}")
 
         # BƯỚC 2: TRUY XUẤT VECTOR
-        query_vector = model_embed.encode(search_query).tolist()
-        results = db.collection("handbook_vectors").find_nearest(
+        # CHỈNH: dimensionality=1536 để khớp với Index bạn vừa tạo
+        embed_res = client.models.embed_content(
+            model=MODEL_EMBED,
+            contents=search_query,
+            config={'output_dimensionality': 1536}
+        )
+        query_vector = embed_res.embeddings[0].values
+
+        # CHỈNH: Đổi tên collection thành fpt_handbook_v1
+        results = db.collection("fpt_handbook_v1").find_nearest(
             vector_field="embedding",
             query_vector=Vector(query_vector),
             distance_measure=DistanceMeasure.COSINE,
@@ -128,10 +123,11 @@ async def chat_endpoint(req: ChatRequest):
         dist = getattr(top_result, 'distance', 0) or 0
         print(f"📊 Distance: {dist:.4f}")
 
+        # GIỮ NGUYÊN THÔNG SỐ 0.6
         if dist > 0.6:
             return {"reply": "🤖 Bot: Câu hỏi này nằm ngoài phạm vi cẩm nang sinh viên FPTU."}
 
-        # BƯỚC 3: GENERATION
+        # BƯỚC 3: GENERATION (GIỮ NGUYÊN LOGIC)
         system_instruction = "Bạn là trợ lý ảo thông minh cho sinh viên Đại học FPT Đà Nẵng. Trả lời thân thiện, ngắn gọn, có icon."
 
         response = client.models.generate_content(
@@ -149,10 +145,7 @@ async def chat_endpoint(req: ChatRequest):
         print(f"Lỗi: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 if __name__ == "__main__":
     import uvicorn
-    # Lấy port từ Render cấp, nếu chạy máy nhà thì dùng 8000
-    port = int(os.environ.get("PORT", 8000))
-    # Nhớ để host="0.0.0.0" để Render quét được cổng nhé
+    port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
