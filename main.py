@@ -148,11 +148,3 @@ async def chat_endpoint(req: ChatRequest):
     except Exception as e:
         print(f"Lỗi: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-if __name__ == "__main__":
-    import uvicorn
-    # Lấy port từ Render cấp, nếu chạy máy nhà thì dùng 8000
-    port = int(os.environ.get("PORT", 8000))
-    # Nhớ để host="0.0.0.0" để Render quét được cổng nhé
-    uvicorn.run(app, host="0.0.0.0", port=port)
