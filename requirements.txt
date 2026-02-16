@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+python-dotenv
+firebase-admin
+sentence-transformers
+google-genai
+pydantic
