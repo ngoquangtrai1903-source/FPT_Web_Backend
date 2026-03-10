@@ -8,8 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
-from google import genai
-from google.genai import types
+from openai import OpenAI
+# ✅ Bỏ hoàn toàn google.genai — dùng chung OpenRouter cho cả chat lẫn embedding
 from google.cloud.firestore_v1.vector import Vector
 from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 
@@ -18,7 +18,6 @@ load_dotenv()
 
 # --- 1. CẤU HÌNH FASTAPI & CORS ---
 app = FastAPI(title="FPTU RAG Backend")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,7 +26,6 @@ app.add_middleware(
 )
 
 # --- 2. KHỞI TẠO DỊCH VỤ ---
-
 if not firebase_admin._apps:
     fb_config = os.getenv("FIREBASE_CONFIG")
     if fb_config:
@@ -39,27 +37,30 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# Khởi tạo Gemini Client
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL_ID = "gemini-2.5-flash"
-# CHỈNH MODEL: Khớp với model bạn dùng để upload
-MODEL_EMBED = "gemini-embedding-001"
+# ✅ Dùng chung 1 client OpenRouter cho cả Chat lẫn Embedding
+client_or = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+)
+MODEL_ID    = "google/gemini-2.5-flash-lite"
+MODEL_EMBED = "google/gemini-embedding-001"  # ✅ gemini-embedding-001 qua OpenRouter
+EMBED_DIM   = 1536  # Phải khớp với dimension đã index trong Firestore
 
-# --- 3. MENU ĐỊNH TUYẾN (GIỮ NGUYÊN 100%) ---
+# --- 3. MENU ĐỊNH TUYẾN ---
 SEARCH_KEYS_MENU = {
-    "V1": "thi tiếng anh đầu vào, xếp lớp, ielts 6.0, miễn học dự bị, cấu trúc đề thi, writing skill",
-    "V2": "lộ trình luk global, hurricane, greenfire, heatwave, thunderbolt, debate, thuyết trình",
-    "V3": "summit 1 summit 2, top notch, progress test pt, assignment môn ent, thi seb eos",
-    "V4": "mẹo pass môn tiếng anh, cách dùng edunext fap, kiểm tra điểm danh, writing speaking assignment",
-    "V5": "học nhạc cụ dân tộc, đàn bầu, đàn tranh, sáo trúc, địa chỉ mua nhạc cụ hảo vĩnh đà nẵng",
-    "V6": "học vovinam fpt, clb vovinam vvc, thi lên đai, võ nhạc, giải khơi nguồn võ việt",
-    "V7": "kinh nghiệm đi quân sự, đồ dùng tân binh, lót giày, phấn rôm, gấp chăn bánh chưng, nội vụ",
-    "V8": "review campus fpt đà nẵng, tòa nhà alpha gamma, thư viện, fpt city ngũ hành sơn",
-    "V9": "so sánh ký túc xá và trọ, ưu nhược điểm ktx fpt, an ninh nội trú, chi phí ở trọ",
+    "V1":  "thi tiếng anh đầu vào, xếp lớp, ielts 6.0, miễn học dự bị, cấu trúc đề thi, writing skill",
+    "V2":  "LUK, lộ trình luk global, hurricane, greenfire, heatwave, thunderbolt, debate, thuyết trình",
+    "V3":  "summit 1 summit 2, top notch, progress test pt, assignment môn ent, thi seb eos",
+    "V4":  "mẹo pass môn tiếng anh, cách dùng edunext fap, kiểm tra điểm danh, writing speaking assignment",
+    "V5":  "học nhạc cụ dân tộc, đàn bầu, đàn tranh, sáo trúc, địa chỉ mua nhạc cụ hảo vĩnh đà nẵng",
+    "V6":  "học vovinam fpt, clb vovinam vvc, thi lên đai, võ nhạc, giải khơi nguồn võ việt",
+    "V7":  "kinh nghiệm đi quân sự, đồ dùng tân binh, lót giày, phấn rôm, gấp chăn bánh chưng, nội vụ",
+    "V8":  "review campus fpt đà nẵng, tòa nhà alpha gamma, thư viện, fpt city ngũ hành sơn",
+    "V9":  "so sánh ký túc xá và trọ, ưu nhược điểm ktx fpt, an ninh nội trú, chi phí ở trọ",
     "V10": "cẩm nang thuê trọ đà nẵng, lừa đảo tiền cọc, hợp đồng thuê nhà, tìm bạn ở ghép",
     "V11": "quán ăn ngon fpt đà nẵng, cafe học bài, zone six 24/7, cơm gà xả xệ, bún đậu 1996",
-    "V12": "link fap flm, tải phần mềm thi seb eos, lỗi kỹ thuật, checkout e360, cài đặt phần mềm",
-    "V13": "quản lý thời gian, thói quen ngủ, xem trước bài, check attendance fap, kỹ năng tự học"
+    "V12": "link, link fap flm, tải phần mềm thi seb eos, lỗi kỹ thuật, checkout e360, cài đặt phần mềm",
+    "V13": "quản lý thời gian, thói quen ngủ, xem trước bài, check attendance fap, kỹ năng tự học",
 }
 
 # --- 4. CẤU TRÚC DỮ LIỆU ---
@@ -71,79 +72,128 @@ class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = []
 
-# --- 5. LOGIC XỬ LÝ CHÍNH ---
 
-def get_semantic_search_query(user_raw_query, history):
+# --- 5. HELPER FUNCTIONS ---
+
+def get_router_key(user_query: str, history: List[ChatMessage]) -> str:
     menu_str = "\n".join([f"- {k}: {v}" for k, v in SEARCH_KEYS_MENU.items()])
-    context_recent = f"Ngữ cảnh lịch sử: {history[-1].content}" if history else ""
+    recent_ctx = f"\nNgữ cảnh hội thoại gần nhất: {history[-1].content}" if history else ""
 
-    prompt = f"""Bạn là bộ định tuyến dữ liệu cho sinh viên FPTU.
-    Nhiệm vụ: Phân tích câu hỏi và chọn ra BỘ KEYWORD phù hợp nhất.
-    DANH SÁCH KEYWORDS:
-    {menu_str}
-    {context_recent}
-    CÂU HỎI NGƯỜI DÙNG: "{user_raw_query}"
-    YÊU CẦU: CHỈ TRẢ VỀ chuỗi keyword tương ứng hoặc câu hỏi gốc. Không giải thích."""
+    prompt = f"""Bạn là bộ định tuyến chủ đề cho chatbot sinh viên FPTU Đà Nẵng.
+
+DANH SÁCH CHỦ ĐỀ:
+{menu_str}
+{recent_ctx}
+
+CÂU HỎI: "{user_query}"
+
+NHIỆM VỤ: Chọn đúng 1 KEY phù hợp nhất.
+QUAN TRỌNG: Chỉ trả về đúng KEY (ví dụ: V6). Không giải thích, không thêm ký tự nào khác."""
 
     try:
-        response = client.models.generate_content(model=MODEL_ID, contents=prompt)
-        return response.text.strip()
-    except:
-        return user_raw_query
+        resp = client_or.chat.completions.create(
+            model=MODEL_ID,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=5,
+        )
+        key = resp.choices[0].message.content.strip().upper()
+        if key in SEARCH_KEYS_MENU:
+            return key
+        print(f"⚠️ Router trả về key không hợp lệ: '{key}' → fallback câu hỏi gốc")
+        return ""
+    except Exception as e:
+        print(f"⚠️ Lỗi Router: {e}")
+        return ""
 
+
+def embed_text(text: str) -> list:
+    """
+    ✅ Tạo vector embedding qua OpenRouter (chung API với chat).
+    OpenRouter trả về response theo chuẩn OpenAI embeddings.
+    """
+    res = client_or.embeddings.create(
+        model=MODEL_EMBED,
+        input=text,
+        dimensions=EMBED_DIM,  # Chỉ định dimension để khớp Firestore index
+    )
+    return res.data[0].embedding
+
+
+# --- 6. ENDPOINT CHAT ---
 @app.post("/chat")
 async def chat_endpoint(req: ChatRequest):
     try:
-        # BƯỚC 1: ROUTING (GIỮ NGUYÊN LOGIC)
-        search_query = get_semantic_search_query(req.message, req.history)
-        print(f"🎯 Router đã chọn: {search_query}")
+        # ── BƯỚC 1: ROUTING → KEY ─────────────────────────────────────────
+        router_key = get_router_key(req.message, req.history)
+        print(f"🎯 Router key: {router_key or '(không khớp, dùng câu hỏi gốc)'}")
 
-        # BƯỚC 2: TRUY XUẤT VECTOR
-        # CHỈNH: dimensionality=1536 để khớp với Index bạn vừa tạo
-        embed_res = client.models.embed_content(
-            model=MODEL_EMBED,
-            contents=search_query,
-            config={'output_dimensionality': 1536}
-        )
-        query_vector = embed_res.embeddings[0].values
+        embed_input = SEARCH_KEYS_MENU[router_key] if router_key else req.message
+        print(f"📌 Embed: '{embed_input[:80]}...'")
 
-        # CHỈNH: Đổi tên collection thành fpt_handbook_v1
+        # ── BƯỚC 2: VECTOR SEARCH ─────────────────────────────────────────
+        query_vector = embed_text(embed_input)
+
         results = db.collection("fpt_handbook_v1").find_nearest(
             vector_field="embedding",
             query_vector=Vector(query_vector),
             distance_measure=DistanceMeasure.COSINE,
-            limit=1
+            limit=1,
         ).get()
 
         if not results:
-            return {"reply": "🤖 Bot: Xin lỗi, mình không tìm thấy dữ liệu liên quan."}
+            return {"reply": "🤖 Xin lỗi, mình không tìm thấy dữ liệu liên quan trong cẩm nang."}
 
-        top_result = results[0]
-        context = top_result.to_dict().get('content', 'Không có nội dung')
-        dist = getattr(top_result, 'distance', 0) or 0
-        print(f"📊 Distance: {dist:.4f}")
+        context_chunks = []
+        for r in results:
+            dist = float(getattr(r, "distance", 0) or 0)
+            content = r.to_dict().get("content", "")
+            print(f"📊 Doc: {r.id} | Distance: {dist:.4f} | Chars: {len(content)}")
+            if dist <= 0.6 and content:
+                context_chunks.append(content)
 
-        # GIỮ NGUYÊN THÔNG SỐ 0.6
-        if dist > 0.6:
-            return {"reply": "🤖 Bot: Câu hỏi này nằm ngoài phạm vi cẩm nang sinh viên FPTU."}
+        if not context_chunks:
+            return {"reply": "🤖 Câu hỏi này nằm ngoài phạm vi cẩm nang FPTU Đà Nẵng của mình. Bạn thử hỏi câu khác nhé! 😊"}
 
-        # BƯỚC 3: GENERATION (GIỮ NGUYÊN LOGIC)
-        system_instruction = "Bạn là trợ lý ảo thông minh cho sinh viên Đại học FPT Đà Nẵng. Trả lời thân thiện, ngắn gọn, có icon."
+        combined_context = "\n\n---\n\n".join(context_chunks)
+        print(f"📝 Context: {len(combined_context)} chars | {len(context_chunks)} chunks")
 
-        response = client.models.generate_content(
-            model=MODEL_ID,
-            contents=f"THÔNG TIN CẨM NANG: {context}\n\nCÂU HỎI: {req.message}",
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.4,
-            )
+        # ── BƯỚC 3: GENERATION ────────────────────────────────────────────
+        system_instruction = (
+            "Bạn là trợ lý ảo thân thiện của FPTU Đà Nẵng.\n\n"
+            "QUY TẮC:\n"
+            "1. CHỈ dùng thông tin trong [TÀI LIỆU] để trả lời.\n"
+            "2. Nếu [TÀI LIỆU] có thông tin liên quan dù gián tiếp, hãy tổng hợp và trả lời đầy đủ.\n"
+            "3. Chỉ nói 'Tiếc quá, mục này mình chưa có thông tin chính thức trong cẩm nang. Để mình cập nhật thêm sau nhé!' khi [TÀI LIỆU] hoàn toàn không liên quan.\n"
+            "4. Trả lời ngắn gọn, dùng icon emoji, xuống dòng dễ đọc.\n"
+            "5. Tuyệt đối không bịa đặt thông tin ngoài [TÀI LIỆU]."
         )
 
-        return {"reply": response.text}
+        messages = [{"role": "system", "content": system_instruction}]
+
+        for h in req.history:
+            messages.append({"role": h.role, "content": h.content})
+
+        messages.append({
+            "role": "user",
+            "content": (
+                f"[TÀI LIỆU]\n{combined_context}\n\n"
+                f"[CÂU HỎI]\n{req.message}"
+            ),
+        })
+
+        resp = client_or.chat.completions.create(
+            model=MODEL_ID,
+            messages=messages,
+            temperature=0.3,
+        )
+
+        return {"reply": resp.choices[0].message.content}
 
     except Exception as e:
-        print(f"Lỗi: {e}")
+        print(f"❌ Lỗi: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

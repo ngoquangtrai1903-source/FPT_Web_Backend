@@ -1,3 +1,12 @@
-firebase-admin
-google-generativeai
-python-dotenv
+# Web framework
+fastapi==0.115.0
+uvicorn==0.30.6
+
+# OpenRouter / OpenAI-compatible client (chat + embedding)
+openai>=1.30.0
+
+# Firebase / Firestore
+firebase-admin>=6.5.0
+
+# Env
+python-dotenv==1.0.1
