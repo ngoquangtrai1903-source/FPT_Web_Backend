@@ -117,6 +117,7 @@ def embed_text(text: str) -> list:
         input=text,
         dimensions=EMBED_DIM,  # Chỉ định dimension để khớp Firestore index
     )
+    print(res)
     return res.data[0].embedding
 
 
@@ -126,7 +127,7 @@ async def chat_endpoint(req: ChatRequest):
     try:
         # ── BƯỚC 1: ROUTING → KEY ─────────────────────────────────────────
         router_key = get_router_key(req.message, req.history)
-    #    print(req.history)
+        print(req.history)
         print(f"🎯 Router key: {router_key or '(không khớp, dùng câu hỏi gốc)'}")
 
         embed_input = SEARCH_KEYS_MENU[router_key] if router_key else req.message
@@ -173,6 +174,7 @@ async def chat_endpoint(req: ChatRequest):
             "3. THIẾU THÔNG TIN: Nếu [TÀI LIỆU] không có câu trả lời, xin lỗi và gợi ý liên hệ Phòng Dịch vụ sinh viên.\n"
             "4. CẤU TRÚC: Chào hỏi nhẹ → Nội dung chính → Lời nhắc/chúc cuối.\n"
             "5. CHỐNG HALLUCINATION: [TÀI LIỆU] là nguồn sự thật duy nhất. "
+            "6. Nếu tin nhắn của người dùng mang tính chất chào hỏi, tâm sự và không có mục đích muốn truy xuất dữ liệu, thì bạn hãy trả lời giao lưu tự nhiên mà không cần dùng tài liệu"
             "Nếu lịch sử hội thoại mâu thuẫn với [TÀI LIỆU], hãy tin [TÀI LIỆU]. "
             "Không trộn thông tin từ chủ đề cũ sang chủ đề mới."
         )
