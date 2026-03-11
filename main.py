@@ -117,7 +117,7 @@ def embed_text(text: str) -> list:
         input=text,
         dimensions=EMBED_DIM,  # Chỉ định dimension để khớp Firestore index
     )
-    print(res)
+#    print(res)
     return res.data[0].embedding
 
 
@@ -127,7 +127,7 @@ async def chat_endpoint(req: ChatRequest):
     try:
         # ── BƯỚC 1: ROUTING → KEY ─────────────────────────────────────────
         router_key = get_router_key(req.message, req.history)
-        print(req.history)
+#        print(req.history)
         print(f"🎯 Router key: {router_key or '(không khớp, dùng câu hỏi gốc)'}")
 
         embed_input = SEARCH_KEYS_MENU[router_key] if router_key else req.message
