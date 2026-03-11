@@ -126,6 +126,7 @@ async def chat_endpoint(req: ChatRequest):
     try:
         # ── BƯỚC 1: ROUTING → KEY ─────────────────────────────────────────
         router_key = get_router_key(req.message, req.history)
+    #    print(req.history)
         print(f"🎯 Router key: {router_key or '(không khớp, dùng câu hỏi gốc)'}")
 
         embed_input = SEARCH_KEYS_MENU[router_key] if router_key else req.message
@@ -160,13 +161,20 @@ async def chat_endpoint(req: ChatRequest):
 
         # ── BƯỚC 3: GENERATION ────────────────────────────────────────────
         system_instruction = (
-            "Bạn là trợ lý ảo thân thiện của FPTU Đà Nẵng.\n\n"
-            "QUY TẮC:\n"
-            "1. CHỈ dùng thông tin trong [TÀI LIỆU] để trả lời.\n"
-            "2. Nếu [TÀI LIỆU] có thông tin liên quan dù gián tiếp, hãy tổng hợp và trả lời đầy đủ.\n"
-            "3. Chỉ nói 'Tiếc quá, mục này mình chưa có thông tin chính thức trong cẩm nang. Để mình cập nhật thêm sau nhé!' khi [TÀI LIỆU] hoàn toàn không liên quan.\n"
-            "4. Trả lời ngắn gọn, dùng icon emoji, xuống dòng dễ đọc.\n"
-            "5. Tuyệt đối không bịa đặt thông tin ngoài [TÀI LIỆU]."
+            "Bạn là 'FPTU Da Nang Buddy' - một người bạn đồng hành ảo cực kỳ nhiệt tình và am hiểu về FPTU Đà Nẵng. 🍊\n\n"
+
+            "PHONG CÁCH:\n"
+            "1. Ngôn ngữ: Thân thiện, gần gũi như một 'tiền bối' đang hướng dẫn 'hậu bối'.\n"
+            "2. Trình bày: Dùng bullet points cho danh sách, in đậm mốc thời gian/địa điểm quan trọng, icon phù hợp ngữ cảnh.\n\n"
+
+            "NGUYÊN TẮC XỬ LÝ:\n"
+            "1. TRUNG THỰC: Chỉ trả lời dựa trên [TÀI LIỆU]. Không tự bịa số điện thoại, link hay quy định.\n"
+            "2. PARAPHRASE: Diễn đạt lại thông tin cho dễ hiểu, không copy-paste văn bản hành chính.\n"
+            "3. THIẾU THÔNG TIN: Nếu [TÀI LIỆU] không có câu trả lời, xin lỗi và gợi ý liên hệ Phòng Dịch vụ sinh viên.\n"
+            "4. CẤU TRÚC: Chào hỏi nhẹ → Nội dung chính → Lời nhắc/chúc cuối.\n"
+            "5. CHỐNG HALLUCINATION: [TÀI LIỆU] là nguồn sự thật duy nhất. "
+            "Nếu lịch sử hội thoại mâu thuẫn với [TÀI LIỆU], hãy tin [TÀI LIỆU]. "
+            "Không trộn thông tin từ chủ đề cũ sang chủ đề mới."
         )
 
         messages = [{"role": "system", "content": system_instruction}]
@@ -187,7 +195,7 @@ async def chat_endpoint(req: ChatRequest):
             messages=messages,
             temperature=0.3,
         )
-
+#        print(resp.choices[0].message.content)
         return {"reply": resp.choices[0].message.content}
 
     except Exception as e:
